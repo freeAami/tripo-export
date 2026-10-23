@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { parseProjectId, fetchProject, modelUrlOf, download } from '../lib/api.js';
+import { recipe, slug, extrasOf } from '../lib/core.js';
 import { createIO, loadClean, describe, exportAll, ALL_FORMATS } from '../lib/convert.js';
 
 const HELP = `tripo-export - download Tripo Studio models and export them locally
@@ -57,7 +58,6 @@ function parseArgs(argv) {
   return o;
 }
 
-const slug = (s) => (s || 'model').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60) || 'model';
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
 
 function progress(label) {
@@ -69,29 +69,6 @@ function progress(label) {
     const pct = total ? ` ${((done / total) * 100).toFixed(0)}%` : '';
     process.stdout.write(`\r  ${label}: ${mb(done)}${total ? ` / ${mb(total)}` : ''}${pct}   `);
     if (done === total) process.stdout.write('\n');
-  };
-}
-
-function recipe(project) {
-  const op = project.operator || {};
-  const gen = op.image_to_model || op.text_to_model || op.multiview_to_model || {};
-  const flags = Object.fromEntries(Object.entries(op).filter(([k, v]) => k.startsWith('is_') && typeof v === 'boolean'));
-  const genParams = Object.fromEntries(
-    Object.entries(gen).filter(([k, v]) => v !== null && typeof v !== 'object' && !/url/.test(k)),
-  );
-  return {
-    project_id: project.id,
-    name: project.project_name,
-    owner: project.owner_name,
-    visibility: project.visibility,
-    category: project.category,
-    style: project.style,
-    operation: op.type,
-    generator: op.image_to_model ? 'image_to_model' : op.text_to_model ? 'text_to_model' : op.multiview_to_model ? 'multiview_to_model' : op.type,
-    model_version: op.model_version || gen.model_version,
-    generation_params: genParams,
-    flags,
-    created_at: op.created_at ? new Date(op.created_at * 1000).toISOString() : undefined,
   };
 }
 
@@ -143,12 +120,7 @@ async function processOne(input, opts, io) {
   if (opts.extras) {
     const extras = path.join(dir, 'extras');
     await mkdir(extras, { recursive: true });
-    const op = project.operator || {};
-    const gen = op.image_to_model || op.text_to_model || op.multiview_to_model || {};
-    const jobs = [];
-    (gen.generate_image || []).forEach((u, i) => jobs.push([u, `input_${i}`]));
-    (project.cover_image || []).forEach((u, i) => jobs.push([u, `preview_${i}`]));
-    if (project.point_cloud_model_url) jobs.push([project.point_cloud_model_url, 'point_cloud']);
+    const jobs = extrasOf(project);
     for (const [u, name] of jobs) {
       const ext = path.extname(new URL(u).pathname) || '.bin';
       const f = path.join(extras, name + ext);
